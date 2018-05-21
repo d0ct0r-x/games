@@ -74,7 +74,7 @@ loadShapeData() {
 		(( n++ ))
 	done <<< "$shapeData"
 
-	(( allShapeTotal = allShapeIds[-1] + 1 ))
+	(( allShapeTotal = ${allShapeIds[@]: -1} + 1 ))
 }
 
 setShape() {
@@ -96,7 +96,7 @@ setShape() {
 		fi
 	done
 
-	(( currentShapeStateTotal = currentShapeStateIds[-1] + 1 ))
+	(( currentShapeStateTotal = ${currentShapeStateIds[@]: -1} + 1 ))
 }
 
 setShapeState() {
