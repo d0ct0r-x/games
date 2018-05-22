@@ -14,6 +14,7 @@ playerColumnStart=4
 gridState=()
 gridColor=()
 emptyCell="  "
+gridBg="  "
 gridWallEven="╩╦"
 gridWallOdd="╦╩"
 
@@ -33,8 +34,9 @@ colorBgOrange="$(tput setab 202)"
 
 colorFgBlack="$(tput setaf 0)"
 colorFgLightGrey="$(tput setaf 7)"
+colorFgGrey="$(tput setaf 8)"
 
-gridBgColor="$colorBgLightGrey"
+gridBgColor="${colorFgGrey}${colorBgLightGrey}"
 gridWallColor="${colorFgLightGrey}${colorBgGrey}"
 
 gridWallEven="${gridWallColor}${gridWallEven}${colorReset}"
@@ -154,7 +156,7 @@ initGrid() {
 	for (( n = 0; n < gridCellTotal; n++ ))
 	do
 		gridState+=("0")
-		gridColor+=("${gridBgColor}${emptyCell}${colorReset}")
+		gridColor+=("${gridBgColor}${gridBg}${colorReset}")
 	done
 }
 
@@ -168,7 +170,7 @@ setGridCellOn() {
 	local n=$(( row * columnTotal + column ))
 
 	gridState["$n"]=1
-	gridColor["$n"]="${color}${emptyCell}${colorReset}"
+	gridColor["$n"]="${color}${colorFgLightGrey}${emptyCell}${colorReset}"
 }
 
 setGridCellOff() {
@@ -180,7 +182,7 @@ setGridCellOff() {
 	local n=$(( row * columnTotal + column ))
 
 	gridState["$n"]=0
-	gridColor["$n"]="${gridBgColor}${emptyCell}${colorReset}"
+	gridColor["$n"]="${gridBgColor}${gridBg}${colorReset}"
 }
 
 drawGridWall() {
