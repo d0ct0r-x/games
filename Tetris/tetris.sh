@@ -60,7 +60,9 @@ allShapeColors=(
 
 # shape state x y
 # 0=O 1=I 2=Z 3=S 4=T 5=L 6=J
-encodedShapeData='H4sIAPbF/FoAA02QyxHEIAxD71RBA5nxv//SltgS2UuswJPEWLZs3bKkp/Y8ap2z/bwXCuCd1rOvjEIhdBkthgxDpp3v8yekRXt9PCME8yV80EZgcvQEewKegCeYGrTEtRgII2EkHITv7/8QyZcl6xI1eZ+WLEz0JGMThTObuLkO1Hs5xfhCfGFrxa0VwottNS2fkhYznczsDSe6fv6pBMHpAQAA'
+encodedShapeData='H4sIAF/hB1sAA02QyxHEIAxD71RBA5nxv//SltgS2UuswJPEWLZs3bKkp/Y8ap2z/bwXCuCd1rOv
+jEIhdBkthgxDpp3v8yekRXt9PCME8yV80EZgcvQEewKegCeYGrTEtRgII2EkHITv7/8QyZcl6xI1
+eZ+WLEz0JGMThTObuLkO1Hs5xfhCfGFrxa0VwottNS2fkhYznczsDSe6fv6pBMHpAQAA'
 shapeData=$(base64 -d <<< "$encodedShapeData" | gunzip)
 
 # Declare functions
@@ -142,16 +144,6 @@ setPlayer() {
 	done
 }
 
-# rotatePlayer() {
-# 	local direction="$1"
-
-# 	(( currentShapeStateId = (currentShapeStateId + direction) % currentShapeStateTotal ))
-# 	(( currentShapeStateId < 0 )) && (( currentShapeStateId += currentShapeStateTotal ))
-
-# 	setShapeState "$currentShapeStateId"
-# 	setPlayer
-# }
-
 initGrid() {
 	for (( n = 0; n < gridCellTotal; n++ ))
 	do
@@ -207,25 +199,13 @@ drawGrid() {
 		gridString+="\n"
 	done
 
-	# gridString+="╚"
-
-	# for (( column = 0; column < columnTotal; column++ ))
-	# do
-	# 	gridString+="══"
-	# done
-
-	# gridString+="╝"
-
 	tput cup 0 0  # reset cursor to top left of screen
-	# clear
 	echo -e "$gridString"
 }
 
 newGame() {
 	input='\0'
-	# clearFixedGrid
 	tput clear
-
 	trap nextFrame ALRM
 }
 
@@ -257,15 +237,15 @@ debugShape() {
 }
 
 movePlayerDown() {
-	input='\0' && ! isCollisionBelow && incrementPlayerRowsBy 1 #&& (( playerRow < lastRow )) && ! isCellBelow
+	input='\0' && ! isCollisionBelow && incrementPlayerRowsBy 1
 }
 
 movePlayerLeft() {
-	input='\0' && ! isCollisionLeft && incrementPlayerColumnsBy -1 #&& (( playerColumn > 0 )) && ! isCellLeft
+	input='\0' && ! isCollisionLeft && incrementPlayerColumnsBy -1
 }
 
 movePlayerRight() {
-	input='\0' && ! isCollisionRight && incrementPlayerColumnsBy 1 #&& (( playerColumn < lastColumn )) && ! isCellRight
+	input='\0' && ! isCollisionRight && incrementPlayerColumnsBy 1
 }
 
 rotatePlayerClockwise() {
@@ -393,18 +373,6 @@ applyRotation() {
 checkForNextGameCycle() {
 	if (( frameCounter == 0 ))
 	then
-		# if isCellBelow
-		# then
-		# 	setGridCellOn "$playerRow" "$playerColumn" "$colorBgCyan"
-		# 	playerRow=0
-		# elif (( playerRow == lastRow ))
-		# then
-		# 	setGridCellOn "$playerRow" "$playerColumn" "$colorBgCyan"
-		# 	playerRow=0
-		# else
-		# 	(( playerRow++ ))
-		# fi
-		# checkCompleteRows
 		if isCollisionBelow
 		then
 			addPlayerToGrid
@@ -417,33 +385,70 @@ checkForNextGameCycle() {
 }
 
 checkForCompleteRows() {
-	completeRows=()
+	minPlayerRow="${playerRows[0]}"
+	maxPlayerRow="$minPlayerRow"
 
 	for row in "${playerRows[@]}"
 	do
-		completeColumnsCounter=0
+	    (( row < minPlayerRow )) && minPlayerRow="$row"
+	    (( row > maxPlayerRow )) && maxPlayerRow="$row"
+	done
+
+	searchRow="$maxPlayerRow"
+	completeRowCounter=0
+	limit=0
+
+	while :
+	do
+		completeColumnCounter=0
 
 		for (( column = 0; column < columnTotal; column++ ))
 		do
-			n=$(( row * columnTotal + column ))
-			(( completeColumnsCounter += gridState[n] ))
+			n=$(( searchRow * columnTotal + column ))
+			(( completeColumnCounter += gridState[n] ))
 		done
 
-		(( completeColumnsCounter == columnTotal )) && completeRows+=("$row")
-		
+		if (( completeColumnCounter == 0 ||
+			  searchRow < 0 ||
+			  (searchRow < minPlayerRow && completeRowCounter == 0) ))
+		then
+			break
+		elif (( completeColumnCounter == columnTotal ))
+		then
+			(( completeRowCounter++ ))
+			clearRow "$searchRow"
+			(( searchRow-- ))
+		elif (( completeRowCounter > 0 ))
+		then
+			moveRowDownByDistance "$completeRowCounter"
+			clearRow "$searchRow"
+			(( searchRow-- ))
+		else
+			(( searchRow-- ))
+		fi
 	done
+}
 
-	if (( ${#completeRows[@]} > 0 ))
-	then
-		for row in "${completeRows[@]}"
-		do
-			for (( column = 0; column < columnTotal; column++ ))
-			do
-				setGridCellOn "$column" "$row" "$colorBgWhite"
-			done
+clearRow() {
+	local row="$1"
 
-		done
-	fi
+	for (( column = 0; column < columnTotal; column++ ))
+	do
+		setGridCellOff "$column" "$row"
+	done
+}
+
+moveRowDownByDistance() {
+	local distance="$1"
+
+	for (( column = 0; column < columnTotal; column++ ))
+	do
+		sourceRowIndex=$(( searchRow * columnTotal + column ))
+		targetRowIndex=$(( (searchRow + distance) * columnTotal + column ))
+
+		gridState[targetRowIndex]="${gridState[sourceRowIndex]}"
+		gridColor[targetRowIndex]="${gridColor[sourceRowIndex]}"
+	done
 }
 
 addPlayerToGrid() {
@@ -478,10 +483,7 @@ initPlayer() {
 
 nextFrame() {
 	# [ "$gameOver" == true ] && gameOver
-	# draw
-	# calculate
-	# readInput
-
+	
 	addPlayerToGrid
 
 	drawGrid
@@ -489,16 +491,6 @@ nextFrame() {
 	removePlayerFromGrid
 
 	checkForNextGameCycle
-
-
-
-	# if (( playerRow == lastRow ))
-	# then
-	# 	setGridCellOn "$playerRow" "$playerColumn" "$playerColor"
-	# 	playerRow=0
-	# fi
-
-	# (( playerRow == lastRow )) && playerRow=0
 
 	readInput
 
@@ -523,57 +515,3 @@ while :
 do
     read -rsn 1 input
 done
-
-# setGridCellOn 0 5 "$colorBgRed"
-
-# initGrid
-
-# setGridCellOn 0 5 "$colorBgRed"
-# setGridCellOn 3 9 "$colorBgBlue"
-# # setGridCellOff 0 5
-
-# drawActiveGrid
-
-# for i in {1..20}
-# do
-# 	clear
-# 	initGrid
-# 	(( playerRow++ ))
-# 	setGridCellOn "$playerRow" "$playerColumn" "$colorBgRed"
-# 	drawActiveGrid
-# 	sleep 0.05
-# done
-
-
-
-
-
-# echo -e "${coloredSquare}${coloredSquare}${coloredSquare}"
-# echo -e "${emptySquare}${coloredSquare}${emptySquare}"
-# echo
-
-# echo -e "${emptySquare}${coloredSquare}"
-# echo -e "${coloredSquare}${coloredSquare}"
-# echo -e "${emptySquare}${coloredSquare}"
-
-# echo "
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ║000000000000000000║
-# ╚══════════════════╝
-# "

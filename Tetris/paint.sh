@@ -11,6 +11,11 @@ colorFgRed="$(tput setaf 1)"
 colorFgGreen="$(tput setaf 2)"
 colorFgYellow="$(tput setaf 3)"
 
+colorFgLightOlive=$(tput setaf 187)
+colorFgOlive=$(tput setaf 101)
+colorFgDarkOlive=$(tput setaf 59)
+colorFgBlack=$(tput setaf 0)
+
 image=()
 imageBlock=()
 imageColor=()
@@ -22,8 +27,8 @@ cursorY=0
 currentBlockIndex=0
 currentColorIndex=0
 
-xMax=20
-yMax=10
+xMax=80
+yMax=25
 lastX=$(( xMax - 1 ))
 lastY=$(( yMax - 1 ))
 imageSize=$(( xMax * yMax ))
@@ -37,9 +42,10 @@ blocks=(
 
 colors=(
 	"$colorNone"
-	"$colorFgRed"
-	"$colorFgGreen"
-	"$colorFgYellow"
+	"$colorFgLightOlive"
+	"$colorFgOlive"
+	"$colorFgDarkOlive"
+	"$colorFgBlack"
 )
 
 initImage() {
@@ -47,7 +53,7 @@ initImage() {
 	do
 		imageBlock+=(0)
 		imageColor+=(0)
-		image+=("${colors[0]}${blocks[0]}${colorReset}")
+		image+=("${colors[0]}${blocks[0]}")
 	done
 }
 
@@ -73,7 +79,7 @@ drawImage() {
 	imageString+="+"
 
 	tput cup 0 0
-	echo -e "$imageString"
+	printf '%b' "$imageString"
 	tput cup "$cursorY" "$cursorX"
 }
 
@@ -84,10 +90,10 @@ readInput() {
         q) quit;;
 		e) exportEscapeString;;
 
-        A) moveCursor up;;
-        B) moveCursor down;;
-        C) moveCursor right;;
-        D) moveCursor left;;
+        i) moveCursor up;;
+        k) moveCursor down;;
+        l) moveCursor right;;
+        j) moveCursor left;;
 
 		z) cycleBlockBy 1;;
 		x) cycleColorBy 1;;
@@ -95,7 +101,8 @@ readInput() {
 }
 
 quit() {
-	input="\0" && clear && exit
+	clear
+	exit
 }
 
 exportEscapeString() {
@@ -113,7 +120,7 @@ exportEscapeString() {
 	done
 
 	clear
-	echo ">>"$imageString"<<"
+	printf '%s\n' "${imageString//$'\e'/\\033}"
 	exit
 }
 
