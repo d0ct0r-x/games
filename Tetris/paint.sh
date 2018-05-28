@@ -176,11 +176,13 @@ while :
 do
 	drawImage
 	readInput
+	sleep 0.01
 done
 
-
-
-
+#     ___    
+#    /1\\\       ___ _     
+#    //2\\      / 1 \ \  
+#               -----
 
 
 
