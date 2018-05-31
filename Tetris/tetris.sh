@@ -2,7 +2,7 @@
 
 # Declare variables
 secondsPerFrame=0.01
-framesPerGameCycle=5
+framesPerGameCycle=10
 rowTotal=18
 columnTotal=10
 playerRowStart=1
@@ -17,6 +17,7 @@ lastColumn=$(( columnTotal - 1 ))
 gridCellStates=()
 gridCellColors=()
 frameCounter=0
+resetCursor='\033[1;1H'
 
 colorReset='\033[0m'
 
@@ -223,7 +224,7 @@ setGridCellOff() {
 }
 
 drawGrid() {
-	gridString=
+	gridString="$resetCursor"
 
 	for (( row = 0; row < rowTotal; row++ ))
 	do
@@ -240,7 +241,6 @@ drawGrid() {
 		gridString+="${colorReset}\n"
 	done
 
-	tput cup 0 0  # reset cursor to top left of screen
 	builtin printf "$gridString"
 }
 
@@ -250,7 +250,7 @@ drawGridWall() {
 
 newGame() {
 	input="\0"
-	tput clear
+	clear
 	trap nextFrame ALRM
 }
 
@@ -263,7 +263,7 @@ gameOver() {
 }
 
 quitGame() {
-	tput clear
+	clear
 	tput cnorm  # turn on cursor
 	exit
 }
