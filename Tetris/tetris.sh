@@ -1,6 +1,10 @@
 #!/bin/bash
 
-# Declare variables
+# =======================================================
+#      Declare variables
+# =======================================================
+
+# -- Config variables (CAN CHANGE) ----------------------
 secondsPerFrame=0.01
 framesPerGameCycle=10
 rowTotal=18
@@ -11,14 +15,20 @@ gridCell="  "
 gridWallEven="╩╦"
 gridWallOdd="╦╩"
 
+# -- Global variables (DO NOT CHANGE) -------------------
 gridCellTotal=$(( rowTotal * columnTotal ))
 lastRow=$(( rowTotal - 1 ))
 lastColumn=$(( columnTotal - 1 ))
-gridCellStates=()
-gridCellColors=()
-frameCounter=0
 resetCursor='\033[1;1H'
+userSettings=$(stty -g)  # save user terminal state
+helpMessage='
+Use arrow keys to move
+  z = rotate clockwise
+  x = rotate anticlockwise
+  q = quit
+'
 
+# -- Color variables ------------------------------------
 colorReset='\033[0m'
 
 colorFgLightGrey16Bit='\033[37m'
@@ -45,11 +55,7 @@ colorBgGreen256Bit='\033[48;5;35m'
 colorBgPurple256Bit='\033[48;5;98m'
 colorBgOrange256Bit='\033[48;5;209m'
 
-# colorBgOrange="$(tput setab 202)"
-
-# colorFgBlack="$(tput setaf 0)"
-# colorFgGrey="$(tput setaf 8)"
-
+# -- Shape color config  --------------------------------
 # 0=O 1=I 2=Z 3=S 4=T 5=L 6=J
 allShapeColors256Bit=(
 	"$colorBgYellow256Bit"
@@ -90,6 +96,7 @@ fi
 gridWallEven="${gridWallColor}${gridWallEven}"
 gridWallOdd="${gridWallColor}${gridWallOdd}"
 
+# -- Shape state config  --------------------------------
 # shape state x y
 # 0=O 1=I 2=Z 3=S 4=T 5=L 6=J
 encodedShapeData='H4sIAF/hB1sAA02QyxHEIAxD71RBA5nxv//SltgS2UuswJPEWLZs3bKkp/Y8ap2z/bwXCuCd1rOv
@@ -102,15 +109,9 @@ allShapeStateIds=()
 allShapeRowOffsets=()
 allShapeColumnOffsets=()
 
-# Declare functions
-initPlayer() {
-	playerRows[0]="$playerRowStart"
-	playerColumns[0]="$playerColumnStart"
-
-	setShape "$(( RANDOM % allShapeTotal ))"
-	setShapeState 0
-	setPlayer
-}
+# =======================================================
+#      Declare functions
+# =======================================================
 
 loadShapeData() {
 	n=0
@@ -125,6 +126,35 @@ loadShapeData() {
 	done <<< "$shapeData"
 
 	(( allShapeTotal = ${allShapeIds[@]: -1} + 1 ))
+}
+
+newGame() {
+	clear
+	input="\0"
+	frameCounter=0
+	initGrid
+	initPlayer
+	trap nextFrame ALRM
+}
+
+initGrid() {
+	gridCellStates=()
+	gridCellColors=()
+
+	for (( n = 0; n < gridCellTotal; n++ ))
+	do
+		gridCellStates+=("0")
+		gridCellColors+=("${gridCellColor}${gridCell}")
+	done
+}
+
+initPlayer() {
+	playerRows[0]="$playerRowStart"
+	playerColumns[0]="$playerColumnStart"
+
+	setShape "$(( RANDOM % allShapeTotal ))"
+	setShapeState 0
+	setPlayer
 }
 
 setShape() {
@@ -164,21 +194,6 @@ setShapeState() {
 	done
 }
 
-getShapeState() {
-	local nextShapeStateId="$1"
-	nextStateRowOffsets=()
-	nextStateColumnOffsets=()
-
-	for n in "${!currentShapeStateIds[@]}"
-	do
-		if (( currentShapeStateIds[n] == nextShapeStateId ))
-		then
-			nextStateRowOffsets+=("${currentShapeRowOffsets[$n]}")
-			nextStateColumnOffsets+=("${currentShapeColumnOffsets[$n]}")
-		fi
-	done
-}
-
 setPlayer() {
 	playerRows=([0]="${playerRows[0]}")
 	playerColumns=([0]="${playerColumns[0]}")
@@ -190,11 +205,34 @@ setPlayer() {
 	done
 }
 
-initGrid() {
-	for (( n = 0; n < gridCellTotal; n++ ))
+# Main frame loop
+nextFrame() {
+	addPlayerToGrid
+
+	drawGrid
+
+	removePlayerFromGrid
+
+	checkForNextGameCycle
+
+	readInput
+
+	incrementFrameClock
+
+    scheduleNextFrame
+}
+
+addPlayerToGrid() {
+	for n in "${!playerRows[@]}"
 	do
-		gridCellStates+=("0")
-		gridCellColors+=("${gridCellColor}${gridCell}")
+		setGridCellOn "${playerColumns[$n]}" "${playerRows[$n]}" "$currentShapeColor"
+	done
+}
+
+removePlayerFromGrid() {
+	for n in "${!playerRows[@]}"
+	do
+		setGridCellOff "${playerColumns[$n]}" "${playerRows[$n]}"
 	done
 }
 
@@ -241,6 +279,8 @@ drawGrid() {
 		gridString+="${colorReset}\n"
 	done
 
+	gridString+="$helpMessage"
+
 	builtin printf "$gridString"
 }
 
@@ -248,28 +288,91 @@ drawGridWall() {
 	(( row % 2 == 0 )) && gridString+="$gridWallEven" || gridString+="$gridWallOdd"
 }
 
-newGame() {
-	input="\0"
-	clear
-	trap nextFrame ALRM
+checkForNextGameCycle() {
+	if (( frameCounter == 0 ))
+	then
+		if isCollisionBelow
+		then
+			(( playerRows[0] == playerRowStart )) && gameOver
+			addPlayerToGrid
+			checkForCompleteRows
+			initPlayer
+		else
+			incrementPlayerRowsBy 1
+		fi
+	fi
 }
 
-gameOver() {
-	trap : ALRM
-	read -rsn1 -p 'GAME OVER!'
-	tput cnorm  # turn on cursor
-	stty echo   # make text visible (fix read bug)
-	exit	
+checkForCompleteRows() {
+	minPlayerRow="${playerRows[0]}"
+	maxPlayerRow="$minPlayerRow"
+
+	for row in "${playerRows[@]}"
+	do
+	    (( row < minPlayerRow )) && minPlayerRow="$row"
+	    (( row > maxPlayerRow )) && maxPlayerRow="$row"
+	done
+
+	searchRow="$maxPlayerRow"
+	completeRowCounter=0
+
+	while :
+	do
+		completeColumnCounter=0
+
+		for (( column = 0; column < columnTotal; column++ ))
+		do
+			n=$(( searchRow * columnTotal + column ))
+			(( completeColumnCounter += gridCellStates[n] ))
+		done
+
+		if (( completeColumnCounter == 0 ||
+			  searchRow < 0 ||
+			  (searchRow < minPlayerRow && completeRowCounter == 0) ))
+		then
+			break
+		elif (( completeColumnCounter == columnTotal ))
+		then
+			(( completeRowCounter++ ))
+			clearRow "$searchRow"
+			(( searchRow-- ))
+		elif (( completeRowCounter > 0 ))
+		then
+			moveRowDownByDistance "$completeRowCounter"
+			clearRow "$searchRow"
+			(( searchRow-- ))
+		else
+			(( searchRow-- ))
+		fi
+	done
 }
 
-quitGame() {
-	clear
-	tput cnorm  # turn on cursor
-	exit
+clearRow() {
+	local row="$1"
+
+	for (( column = 0; column < columnTotal; column++ ))
+	do
+		setGridCellOff "$column" "$row"
+	done
+}
+
+moveRowDownByDistance() {
+	local distance="$1"
+
+	for (( column = 0; column < columnTotal; column++ ))
+	do
+		sourceRowIndex=$(( searchRow * columnTotal + column ))
+		targetRowIndex=$(( (searchRow + distance) * columnTotal + column ))
+
+		gridCellStates[targetRowIndex]="${gridCellStates[sourceRowIndex]}"
+		gridCellColors[targetRowIndex]="${gridCellColors[sourceRowIndex]}"
+	done
 }
 
 readInput() {
 	case "$input" in
+		q) quitGame;;
+
         B) movePlayerDown;;
         C) movePlayerRight;;
         D) movePlayerLeft;;
@@ -396,6 +499,21 @@ calculateRotationBy() {
 	(( nextShapeStateId < 0 )) && (( nextShapeStateId += currentShapeStateTotal ))
 }
 
+getShapeState() {
+	local nextShapeStateId="$1"
+	nextStateRowOffsets=()
+	nextStateColumnOffsets=()
+
+	for n in "${!currentShapeStateIds[@]}"
+	do
+		if (( currentShapeStateIds[n] == nextShapeStateId ))
+		then
+			nextStateRowOffsets+=("${currentShapeRowOffsets[$n]}")
+			nextStateColumnOffsets+=("${currentShapeColumnOffsets[$n]}")
+		fi
+	done
+}
+
 getNextPlayer() {
 	nextPlayerRows=()
 	nextPlayerColumns=()
@@ -413,127 +531,36 @@ applyRotation() {
 	setPlayer
 }
 
-checkForNextGameCycle() {
-	if (( frameCounter == 0 ))
-	then
-		if isCollisionBelow
-		then
-			(( playerRows[0] == 1 )) && gameOver
-			addPlayerToGrid
-			checkForCompleteRows
-			initPlayer
-		else
-			incrementPlayerRowsBy 1
-		fi
-	fi
-}
-
-checkForCompleteRows() {
-	minPlayerRow="${playerRows[0]}"
-	maxPlayerRow="$minPlayerRow"
-
-	for row in "${playerRows[@]}"
-	do
-	    (( row < minPlayerRow )) && minPlayerRow="$row"
-	    (( row > maxPlayerRow )) && maxPlayerRow="$row"
-	done
-
-	searchRow="$maxPlayerRow"
-	completeRowCounter=0
-
-	while :
-	do
-		completeColumnCounter=0
-
-		for (( column = 0; column < columnTotal; column++ ))
-		do
-			n=$(( searchRow * columnTotal + column ))
-			(( completeColumnCounter += gridCellStates[n] ))
-		done
-
-		if (( completeColumnCounter == 0 ||
-			  searchRow < 0 ||
-			  (searchRow < minPlayerRow && completeRowCounter == 0) ))
-		then
-			break
-		elif (( completeColumnCounter == columnTotal ))
-		then
-			(( completeRowCounter++ ))
-			clearRow "$searchRow"
-			(( searchRow-- ))
-		elif (( completeRowCounter > 0 ))
-		then
-			moveRowDownByDistance "$completeRowCounter"
-			clearRow "$searchRow"
-			(( searchRow-- ))
-		else
-			(( searchRow-- ))
-		fi
-	done
-}
-
-clearRow() {
-	local row="$1"
-
-	for (( column = 0; column < columnTotal; column++ ))
-	do
-		setGridCellOff "$column" "$row"
-	done
-}
-
-moveRowDownByDistance() {
-	local distance="$1"
-
-	for (( column = 0; column < columnTotal; column++ ))
-	do
-		sourceRowIndex=$(( searchRow * columnTotal + column ))
-		targetRowIndex=$(( (searchRow + distance) * columnTotal + column ))
-
-		gridCellStates[targetRowIndex]="${gridCellStates[sourceRowIndex]}"
-		gridCellColors[targetRowIndex]="${gridCellColors[sourceRowIndex]}"
-	done
-}
-
-addPlayerToGrid() {
-	for n in "${!playerRows[@]}"
-	do
-		setGridCellOn "${playerColumns[$n]}" "${playerRows[$n]}" "$currentShapeColor"
-	done
-}
-
-removePlayerFromGrid() {
-	for n in "${!playerRows[@]}"
-	do
-		setGridCellOff "${playerColumns[$n]}" "${playerRows[$n]}"
-	done
-}
-
-nextFrame() {
-	# [ "$gameOver" == true ] && gameOver
-	
-	addPlayerToGrid
-
-	drawGrid
-
-	removePlayerFromGrid
-
-	checkForNextGameCycle
-
-	readInput
-
+incrementFrameClock() {
 	(( frameCounter = (frameCounter + 1) % framesPerGameCycle ))
-
-    ( sleep $secondsPerFrame; kill -ALRM $$ )&
 }
+
+scheduleNextFrame() {
+	( sleep $secondsPerFrame; kill -ALRM $$ )&
+}
+
+gameOver() {
+	trap : ALRM
+	read -rsn1 -p 'GAME OVER!'
+	quitGame
+}
+
+quitGame() {
+	clear
+	tput cnorm            # turn on cursor
+	stty "$userSettings"  # restore user terminal state
+	exit
+}
+
+# =======================================================
+#      SCRIPT START
+# =======================================================
 
 loadShapeData
-
-initGrid
-initPlayer
+tput civis              # turn off cursor
+trap quitGame ERR EXIT
 
 # Main game loop
-tput civis  # turn off cursor
-trap quitGame ERR EXIT
 newGame
 nextFrame
 
@@ -542,3 +569,7 @@ while :
 do
     read -rsn 1 input
 done
+
+# =======================================================
+#      SCRIPT END
+# =======================================================
