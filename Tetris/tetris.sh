@@ -102,7 +102,7 @@ gridWallOdd="${gridWallColor}${gridWallOdd}"
 encodedShapeData='H4sIAF/hB1sAA02QyxHEIAxD71RBA5nxv//SltgS2UuswJPEWLZs3bKkp/Y8ap2z/bwXCuCd1rOv
 jEIhdBkthgxDpp3v8yekRXt9PCME8yV80EZgcvQEewKegCeYGrTEtRgII2EkHITv7/8QyZcl6xI1
 eZ+WLEz0JGMThTObuLkO1Hs5xfhCfGFrxa0VwottNS2fkhYznczsDSe6fv6pBMHpAQAA'
-shapeData=$(base64 -d <<< "$encodedShapeData" | gunzip)
+shapeData=$(base64 --decode <<< "$encodedShapeData" | gunzip)
 
 allShapeIds=()
 allShapeStateIds=()
