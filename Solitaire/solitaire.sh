@@ -58,11 +58,34 @@ cursor1=(
 	'╚═'
 )
 
+gameOriginX=3
+gameOriginY=2
+columnSpacing=3
+rowSpacing=2
+gameZoneRows=2
+gameZoneColumns=7
+
+stockPileId=0
+wastePileId=1
+# empty=2
+foundationPile1Id=3
+foundationPile2Id=4
+foundationPile3Id=5
+foundationPile4Id=6
+tableauPile1Id=7
+tableauPile2Id=8
+tableauPile3Id=9
+tableauPile4Id=10
+tableauPile5Id=11
+tableauPile6Id=12
+tableauPile7Id=13
+
 rankTotal="${#rank[@]}"
 suitTotal="${#suit[@]}"
 cardTotal="$(( rankTotal * suitTotal ))"
 cardHeight="${#cardFaceUp[@]}"
-cardWidth="${#cardFaceUp[1]}"
+cardWidth="${#cardFaceUp[0]}"
+gameZoneTotal="$(( gameZoneRows * gameZoneColumns ))"
 
 debugObjects() {
 	objectTotal="${#objectText[@]}"
@@ -235,6 +258,19 @@ setColors() {
 	objectColor[cardShadowId]="$cardShadowColor"
 }
 
+setPositions() {
+	local row column
+
+	for (( row = 0; row < gameZoneRows; row++ ))
+	do
+		for (( column = 0; column < gameZoneColumns; column++ ))
+		do
+			gameZoneX+=("$(( gameOriginX + column * (cardWidth + columnSpacing) ))")
+			gameZoneY+=("$(( gameOriginY + row * (cardHeight + rowSpacing) ))")
+		done
+	done
+}
+
 draw() {
     buffer+="\033[${2};${1}H${3}"
 }
@@ -280,14 +316,25 @@ drawCardShadow() {
 	drawObject "$1" "$2" "${objectColor[cardShadowId]}" "${objectText[cardShadowId]}"
 }
 
+drawStockPile() {
+	drawCard 3 2 0
+}
+
 clear
 
 createObjects
 setColors
+setPositions
 
-draw 1 1 "$colorFullBgGreen"
-printf "$buffer"
-buffer=
+stockPile=(0)
+
+for (( n = 0; n < gameZoneTotal; n++ ))
+do
+	drawCard "${gameZoneX[n]}" "${gameZoneY[n]}" 1
+done
+
+printf "$buffer\n\n"
+exit
 
 drawCard 3 2 0
 drawCard 10 2 45 v && drawCard 13 2 23 v && drawCard 16 2 18
