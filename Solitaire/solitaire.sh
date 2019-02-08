@@ -1,6 +1,9 @@
 #!/bin/bash
 colorReset='\033[0m'
 underline='\033[4m'
+bold='\033[1m'
+invert='\033[7m'
+dim='\033[2m'
 
 colorBgBlack='\033[40m'
 colorBgRed='\033[41m'
@@ -40,17 +43,21 @@ cardEdgeColor=5
 cardShadowColor=6
 cursorNormalColor=7
 cursorSelectColor=8
+cardHeartInverseColor=9
+cardSpadeInverseColor=10
 
 defaultTheme=(
 	[cardFaceUpColor]="$colorBgWhite"
 	[cardHeartColor]="$colorFgRed"
 	[cardSpadeColor]="$colorFgBlack"
-	[cardFaceDownColor]="${colorFgWhite}${colorBgBlue}"
-	[cardSpaceColor]="$colorFgWhite"
+	[cardFaceDownColor]="${colorFgLightGrey}${colorBgBlue}"
+	[cardSpaceColor]="$colorFgLightGrey"
 	[cardEdgeColor]="${colorFgBlack}${colorBgWhite}"
 	[cardShadowColor]="${colorBgLightGrey}"
 	[cursorNormalColor]="${colorFgLightYellow}"
 	[cursorSelectColor]="${colorFgLightGreen}"
+	[cardHeartInverseColor]="${colorBgLightGrey}"
+	[cardSpadeInverseColor]="${colorBgLightGrey}"
 )
 
 darkTheme=(
@@ -63,9 +70,15 @@ darkTheme=(
 	[cardShadowColor]="${colorBgLightGrey}"
 	[cursorNormalColor]="${colorFgLightYellow}"
 	[cursorSelectColor]="${colorFgLightGreen}"
+	[cardHeartInverseColor]="${colorBgLightGrey}"
+	[cardSpadeInverseColor]="${invert}"
 )
 
+themes=("${defaultTheme[@]}" "${darkTheme[@]}")
 theme=("${darkTheme[@]}")
+themeId=0
+themeParamsTotal="${#defaultTheme[@]}"
+themeTotal=$(( ${#themes[@]} / themeParamsTotal ))
 
 rank=(A 2 3 4 5 6 7 8 9 10 J Q K)
 suit=(♥ ♣ ♦ ♠)
@@ -99,11 +112,12 @@ gameZone=(
 	"$tableauPile" "$tableauPile" "$tableauPile" "$tableauPile"    "$tableauPile"    "$tableauPile"    "$tableauPile"
 )
 
-gameOriginX=3
+gameOriginX=5
 gameOriginY=2
 columnSpacing=3
 rowSpacing=3
 gameZoneColumns=7
+maxPileSize=7
 
 rankTotal="${#rank[@]}"
 suitTotal="${#suit[@]}"
@@ -112,13 +126,28 @@ cardHeight="${#cardFaceUp[@]}"
 cardWidth="${#cardFaceUp[0]}"
 gameZoneTotal="${#gameZone[@]}"
 gameZoneRows="$(( (gameZoneTotal + gameZoneColumns - 1) / gameZoneColumns ))"
+playerStartX="$(( (gameZoneColumns - 1) / 2 ))"
+playerStartY="$(( gameZoneRows - 1 ))"
+playerStartZone="$(( playerStartX + playerStartY * gameZoneColumns ))"
+
+commandQuit=0
+commandMoveLeft=1
+commandMoveRight=2
+commandMoveUp=3
+commandMoveDown=4
+commandAction=5
+commandCycleColors=6
+commandNewGame=7
+
+current=0
+previous=1
 
 debugObjects() {
-	objectTotal="${#objectText[@]}"
+	objectTotal="${#objectOn[@]}"
 
-	for (( n = 0; n <= objectTotal; n++ ))
+	for (( n = 0; n < objectTotal; n++ ))
 	do
-		printf '%s\n' "${objectText[n]}  ${objectColor[n]}"
+		printf "${objectColor[n]}${objectOn[n]}$colorReset|${objectOff[n]}|\n"
 	done
 }
 
@@ -134,12 +163,11 @@ createObjects() {
 createDeck() {
 	local s r
 
-	deck=({0.."$cardTotal"})
-
 	for (( s = 0; s < suitTotal; s++ ))
 	do
 		for (( r = 0; r < rankTotal; r++ ))
 		do
+			deck+=("$(( r + s * rankTotal ))")
 			cardRank+=("$r")
 			cardSuit+=("$s")
 			createFaceUpCard
@@ -161,10 +189,12 @@ createFaceUpCard() {
 		line="${line/<1/$lpad}"
 		line="${line/♥/${suit[s]}}"
 
-		object+="${line};"
+        (( n > 0 )) && object+=";"
+		object+="$line"
 	done
 
-	objectText+=("${object%;}")
+	objectOn+=("$object")
+	objectOff+=("${object//[^;]/ }")
 }
 
 createFaceDownCard() {
@@ -172,16 +202,17 @@ createFaceDownCard() {
 
 	for (( h = 0; h < cardHeight; h++ ))
 	do
+		(( h > 0 )) && object+=";"
+
 		for (( w = 0; w < cardWidth; w++ ))
 		do
 			object+="$cardFaceDownPattern"
 		done
-
-		object+=';'
 	done
 
-	objectText+=("${object%;}")
-	cardFaceDownId="$(( ${#objectText[@]} - 1 ))"
+	objectOn+=("$object")
+	objectOff+=("${object//[^;]/ }")
+	cardFaceDownId="$(( ${#objectOn[@]} - 1 ))"
 }
 
 createCardSpace() {
@@ -189,6 +220,8 @@ createCardSpace() {
 
 	for (( h = 0; h < cardHeight; h++ ))
 	do
+		(( h > 0 )) && object+=";"
+
 		for (( w = 0; w < cardWidth; w++ ))
 		do
 			if (( h == 0 && w == 0 ))
@@ -213,12 +246,11 @@ createCardSpace() {
 				object+=" "
 			fi
 		done
-
-		object+=';'
 	done
 
-	objectText+=("${object%;}")
-	cardSpaceId="$(( ${#objectText[@]} - 1 ))"
+	objectOn+=("$object")
+	objectOff+=("${object//[^;]/ }")
+	cardSpaceId="$(( ${#objectOn[@]} - 1 ))"
 }
 
 createCardEdge() {
@@ -226,56 +258,63 @@ createCardEdge() {
 
 	for (( h = 0; h < cardHeight; h++ ))
 	do
-		object+="${cardEdge};"
+		(( h > 0 )) && object+=";"
+		object+="$cardEdge"
 	done
 
-	objectText+=("${object%;}")
-	cardEdgeId="$(( ${#objectText[@]} - 1 ))"
+	objectOn+=("$object")
+	objectOff+=("${object//[^;]/ }")
+	cardEdgeId="$(( ${#objectOn[@]} - 1 ))"
 }
 
 createCardShadow() {
 	local h w object
 
-	for (( h = 0; h < cardHeight; h++ ))
+	for (( h = 0; h < cardHeight - 1; h++ ))
 	do
+		(( h > 0 )) && object+=";"
+
 		for (( w = 0; w < cardWidth; w++ ))
 		do
 			object+=" "
 		done
-
-		object+=';'
 	done
 
-	objectText+=("${object%;}")
-	cardShadowId="$(( ${#objectText[@]} - 1 ))"
+	objectOn+=("$object")
+	objectOff+=("${object//[^;]/ }")
+	cardShadowId="$(( ${#objectOn[@]} - 1 ))"
 }
 
 createCursors() {
-	local w zoneCursor rangeCursor selectCursor
+	local w zoneCursor selectCursor
 
 	zoneCursor+="$zoneCursorLeft"
-	rangeCursor+="$rangeCursorRight "
 	selectCursor+="${rangeCursorLeft}${zoneCursorLeft}"
 
 	for (( w = 0; w < cardWidth; w++ ))
 	do
 		zoneCursor+="$zoneCursorMiddle"
-		rangeCursor+=" "
 		selectCursor+="$zoneCursorMiddle"
 	done
 
 	zoneCursor+="$zoneCursorRight"
-	rangeCursor+=" $rangeCursorLeft"
 	selectCursor+="${zoneCursorRight}${rangeCursorRight}"
 
-	objectText+=("$zoneCursor")
-	zoneCursorId="$(( ${#objectText[@]} - 1 ))"
+	objectOn+=("$zoneCursor")
+	objectOff+=("${zoneCursor//?/ }")
+	zoneCursorId="$(( ${#objectOn[@]} - 1 ))"
 
-	objectText+=("$rangeCursor")
-	rangeCursorId="$(( ${#objectText[@]} - 1 ))"
+	objectOn+=("$rangeCursorRight")
+	objectOff+=("${rangeCursorRight//?/ }")
+	rangeCursorRightId="$(( ${#objectOn[@]} - 1 ))"
 
-	objectText+=("$selectCursor")
-	selectCursorId="$(( ${#objectText[@]} - 1 ))"
+	objectOn+=("$rangeCursorLeft")
+	objectOff+=("${rangeCursorLeft//?/ }")
+	rangeCursorLeftId="$(( ${#objectOn[@]} - 1 ))"
+
+	objectOn+=("$selectCursor")
+	objectOff+=("${selectCursor//?/ }")
+	selectCursorId="$(( ${#objectOn[@]} - 1 ))"
 }
 
 setColors() {
@@ -295,12 +334,13 @@ setColors() {
 	objectColor[cardEdgeId]="${theme[cardEdgeColor]}"
 	objectColor[cardShadowId]="${theme[cardShadowColor]}"
 	objectColor[zoneCursorId]="${theme[cursorNormalColor]}"
-	objectColor[rangeCursorId]="${theme[cursorNormalColor]}"
+	objectColor[rangeCursorRightId]="${theme[cursorNormalColor]}"
+	objectColor[rangeCursorLeftId]="${theme[cursorNormalColor]}"
 	objectColor[selectCursorId]="${theme[cursorSelectColor]}"
 }
 
 setGameZones() {
-	local row column
+	local row column n
 
 	for (( row = 0; row < gameZoneRows; row++ ))
 	do
@@ -308,7 +348,64 @@ setGameZones() {
 		do
 			gameZoneX+=("$(( gameOriginX + column * (cardWidth + columnSpacing) ))")
 			gameZoneY+=("$(( gameOriginY + row * (cardHeight + rowSpacing) ))")
+
+			n=$(( column + row * gameZoneColumns ))
+
+			case "${gameZone[n]}" in
+				"$stockPile") stockZone="$n";;
+		        "$wastePile") wasteZone="$n";;
+		        "$foundationPile") foundationZone+=("$n");;
+		        "$tableauPile") tableauZone+=("$n");;
+			esac
 		done
+	done
+
+	foundationZoneTotal="${#foundationZone[@]}"
+	tableauZoneTotal="${#tableauZone[@]}"
+}
+
+shuffleDeck() {
+   local i tmp max rand
+
+   max=$(( 32768 / cardTotal * cardTotal ))
+
+   for (( i = cardTotal - 1; i > 0; i-- ))
+   do
+      while (( (rand = $RANDOM) >= max )); do :; done
+      rand=$(( rand % (i + 1) ))
+      tmp="${deck[i]}" deck[i]="${deck[rand]}" deck[rand]="$tmp"
+   done
+}
+
+dealAllCards() {
+	local n row column zoneId
+	local deckIndex=0
+
+	for (( n = 0; n < gameZoneTotal; n++ ))
+	do
+		gameZoneCards[n]=
+		gameZoneCardsTotal[n]=0
+		gameZoneHidden[n]=0
+	done
+
+	for (( row = 0; row < maxPileSize; row++ ))
+	do
+		for (( column = row; column < tableauZoneTotal; column++ ))
+		do
+			zoneId="${tableauZone[column]}"
+			gameZoneCards[zoneId]+="${deck[deckIndex]}"
+			(( gameZoneCardsTotal[zoneId]++ ))
+			(( column > row )) && gameZoneCards[zoneId]+=";"
+			gameZoneHidden[zoneId]="$row"
+			(( deckIndex++ ))
+		done
+	done
+
+	while (( deckIndex < cardTotal ))
+	do
+		gameZoneCards[stockZone]+="${deck[deckIndex]}"
+		(( deckIndex < cardTotal - 1 )) && gameZoneCards[stockZone]+=";"
+		(( deckIndex++ ))
 	done
 }
 
@@ -317,12 +414,13 @@ drawAllGameZones() {
 
 	for (( n = 0; n < gameZoneTotal; n++ ))
 	do
-		drawGameZone "$n"
+		drawGameZone true "$n"
 	done
 }
 
 drawGameZone() {
-	local n="$1"
+	local isVisible="$1"
+	local n="$2"
 
 	case "${gameZone[n]}" in
 		"$stockPile") drawStockPile;;
@@ -337,7 +435,7 @@ drawStockPile() {
 	local y="${gameZoneY[n]}"
 	[[ "${gameZoneCards[n]}" = "" ]] && drawCardSpace "$x" "$y" && return
 
-	drawFaceDownCard "${gameZoneX[n]}" "${gameZoneY[n]}"
+	drawFaceDownCard "$isVisible" "${gameZoneX[n]}" "${gameZoneY[n]}"
 }
 
 drawWastePile() {
@@ -351,8 +449,8 @@ drawWastePile() {
 
 	for (( i = 0; i < total; i++ ))
 	do
-		(( i > 0 )) && drawCardEdge "$(( x - 1))" "$y"
-		drawCard "$x" "$y" "${pile[i]}"
+		(( i > 0 )) && drawCardEdge "$isVisible" "$(( x - 1))" "$y"
+		drawCard "$isVisible" "$x" "$y" "${pile[i]}"
 
 		(( x += 3 ))
 	done
@@ -361,9 +459,9 @@ drawWastePile() {
 drawFoundationPile() {
 	local x="${gameZoneX[n]}"
 	local y="${gameZoneY[n]}"
-	[[ "${gameZoneCards[n]}" = "" ]] && drawCardSpace "$x" "$y" && return
+	[[ "${gameZoneCards[n]}" = "" ]] && drawCardSpace "$isVisible" "$x" "$y" && return
 
-	drawCard "$x" "$y" "${gameZoneCards[n]##*;}"
+	drawCard "$isVisible" "$x" "$y" "${gameZoneCards[n]##*;}"
 }
 
 drawTableauPile() {
@@ -380,110 +478,477 @@ drawTableauPile() {
 		(( i < gameZoneHidden[n] )) && objectId="$cardFaceDownId" || objectId="${pile[i]}"
 		color="${objectColor[objectId]}"
 		(( i < total - 1 )) && color+="$underline"
-		drawObject "$x" "$y" "$color" "${objectText[objectId]}"
-
+		drawObject "$isVisible" "$x" "$y" "$objectId" "$color"
 		(( y++ ))
 	done
 }
 
-drawZoneCursor() {
-	local x="${gameZoneX[$1]}"
-	local y="${gameZoneY[$1]}"
+drawPlayerCards() {
+	local x="${gameZoneX[playerZone]}"
+	local y="${gameZoneY[playerZone]}"
+	local offset="${gameZoneCardsTotal[playerZone]}"
+	local i pile objectId color
 
-	drawObject "$(( x - 1 ))" "$(( y + cardHeight + 1 ))" "${objectColor[zoneCursorId]}" "${objectText[zoneCursorId]}"
+	IFS=';' pile=($playerCards)
+	local total="${#pile[@]}"
+	(( gameZone[playerZone] == tableauPile )) && (( y += offset ))
+
+	# (( offset > 0 )) && drawCardShadow "$1" "$x" "$y"
+	# local zoneTopCard="${gameZoneCards[playerZone]##*;}"
+	# (( offset > 0 )) && drawObject "$1" "$x" "$(( y - 1 ))" "$zoneTopCard" "${objectColor[zoneTopCard]}${invert}"
+	drawCardHighlight "$1"
+
+	for (( i = 0; i < total; i++ ))
+	do
+		objectId="${pile[i]}"
+		color="${objectColor[objectId]}"
+		(( i < total - 1 )) && color+="$underline"
+		drawObject "$1" "$(( x + 1 ))" "$(( y + 1 ))" "$objectId" "$color"
+		(( y++ ))
+	done
+}
+
+drawCardHighlight() {
+	local x="${gameZoneX[playerZone]}"
+	local y="${gameZoneY[playerZone]}"
+	local offset="${gameZoneCardsTotal[playerZone]}"
+	local zoneTopCard="${gameZoneCards[playerZone]##*;}"
+	local highlightColor="${objectColor[zoneTopCard]}"
+
+	(( gameZone[playerZone] == tableauPile )) && (( y += offset - 1 ))
+
+	(( cardSuit[zoneTopCard] % 2 == 0 )) && \
+	highlightColor+="${theme[cardHeartInverseColor]}" || \
+	highlightColor+="${theme[cardSpadeInverseColor]}"
+
+	(( offset > 0 )) && \
+	(( gameZoneCardsTotal[playerZone] > gameZoneHidden[playerZone] )) && \
+	drawObject "$1" "$x" "$(( y ))" "$zoneTopCard" "$highlightColor"
+}
+
+drawCard() {
+	drawObject "$1" "$2" "$3" "$4"
+}
+
+drawFaceDownCard() {
+	drawObject "$1" "$2" "$3" "$cardFaceDownId"
+}
+
+drawCardSpace() {
+	drawObject "$1" "$2" "$3" "$cardSpaceId"
+}
+
+drawCardEdge() {
+	drawObject "$1" "$2" "$3" "$cardEdgeId"
+}
+
+drawCardShadow() {
+	drawObject "$1" "$2" "$3" "$cardShadowId"
+}
+
+drawCursor() {
+	if $playerSelect
+	then
+		drawSelectCursor "$1" "$2"
+		drawPlayerCards "$1"
+	else
+		drawZoneCursor "$1" "$2"
+		(( gameZone["$2"] == tableauPile )) && drawRangeCursor "$1" "$2"
+	fi
+}
+
+drawZoneCursor() {
+	local x="${gameZoneX[$2]}"
+	local y="${gameZoneY[$2]}"
+	local offset="${gameZoneCardsTotal[$2]}"
+
+	(( gameZone["$2"] == tableauPile )) && (( offset > 0 )) && (( y += offset - 1 ))
+	drawObject "$1" "$(( x - 1 ))" "$(( y + cardHeight + 1 ))" "$zoneCursorId"
 }
 
 drawRangeCursor() {
-	local x="${gameZoneX[$1]}"
-	local y="${gameZoneY[$1]}"
+	local x="${gameZoneX[$2]}"
+	local y="${gameZoneY[$2]}"
+	local offset="${gameZoneCardsTotal[$2]}"
 
-	drawObject "$(( x - 2 ))" "$y" "${objectColor[rangeCursorId]}" "${objectText[rangeCursorId]}"
+	(( offset > 0 )) && (( y += offset - 1 - playerPileIndex ))
+	drawObject "$1" "$(( x - 2 ))" "$y" "$rangeCursorRightId"
+	drawObject "$1" "$(( x + cardWidth + 1 ))" "$y" "$rangeCursorLeftId"
 }
 
 drawSelectCursor() {
-	local x="${gameZoneX[$1]}"
-	local y="${gameZoneY[$1]}"
+	local x="${gameZoneX[$2]}"
+	local y="${gameZoneY[$2]}"
+	local offset="$(( gameZoneCardsTotal[$2] + playerCardsTotal ))"
 
-	drawObject "$(( x - 1 ))" "$(( y + cardHeight + 1 ))" "${objectColor[selectCursorId]}" "${objectText[selectCursorId]}"
+	(( gameZone["$2"] == tableauPile )) && (( offset > 0 )) && (( y += offset - 1 ))
+	drawObject "$1" "$(( x - 1 ))" "$(( y + cardHeight + 1 ))" "$selectCursorId"
+}
+
+drawObject() {
+	local isVisible="$1"
+	local x="$2"
+	local y="$3"
+	local objectId="$4"
+	local colorOverride="$5"
+	local object color lines line n
+
+	if $isVisible
+	then
+		object="${objectOn[objectId]}"
+		[ -n "$colorOverride" ] && color="$colorOverride" || color="${objectColor[objectId]}"
+	else
+		object="${objectOff[objectId]}"
+	fi
+
+	IFS=';' lines=($object)
+	local linesTotal="${#lines[@]}"
+
+	for (( n = 0; n < linesTotal; n++ ))
+	do
+		line="${color}${lines[n]}${colorReset}"
+		draw "$x" "$y" "$line"
+		(( y++ ))
+	done
 }
 
 draw() {
     buffer+="\033[${2};${1}H${3}"
 }
 
-drawObject() {
-	local x="$1"
-	local y="$2"
-	local color="$3"
-	local lines n
-
-	IFS=';' lines=($4)
-	local linesTotal="${#lines[@]}"
-
-	for (( n = 0; n < linesTotal; n++ ))
-	do
-		draw "$x" "$y" "${color}${lines[n]}${colorReset}"
-		(( y++ ))
-	done
+movePlayerLeft() {
+	(( playerX = (playerX - 1 + gameZoneColumns) % gameZoneColumns ))
+	movePlayerToZone $(( playerX + playerY * gameZoneColumns ))
 }
 
-drawCard() {
-	local color="${objectColor[$3]}"
+movePlayerRight() {
+	(( playerX = (playerX + 1 + gameZoneColumns) % gameZoneColumns ))
+	movePlayerToZone $(( playerX + playerY * gameZoneColumns ))
+}
 
-	[[ "$4" = 'h' ]] && color+="$underline"
-
-	drawObject "$1" "$2" "$color" "${objectText[$3]}"
-
-	if [[ "$4" = 'v' ]]
+movePlayerUp() {
+	if (( gameZone[playerZone] == tableauPile )) && \
+	   (( playerPileIndex < gameZoneCardsTotal[playerZone] - gameZoneHidden[playerZone] - 1 )) && \
+	   ! $playerSelect
 	then
-	    drawCardEdge "$(( $1 + 2 ))" "$2"
+		drawRangeCursor false "$playerZone"
+		(( playerPileIndex++ ))
+		drawRangeCursor true "$playerZone"
+	else
+		(( playerY = (playerY - 1 + gameZoneRows) % gameZoneRows ))
+		movePlayerToZone $(( playerX + playerY * gameZoneColumns ))
 	fi
 }
 
-drawFaceDownCard() {
-	drawObject "$1" "$2" "${objectColor[cardFaceDownId]}" "${objectText[cardFaceDownId]}"
+movePlayerDown() {
+	if (( gameZone[playerZone] == tableauPile )) && \
+	   (( playerPileIndex > 0 ))
+	then
+		drawRangeCursor false "$playerZone"
+		(( playerPileIndex-- ))
+		drawRangeCursor true "$playerZone"
+	else
+		(( playerY = (playerY + 1 + gameZoneRows) % gameZoneRows ))
+		movePlayerToZone $(( playerX + playerY * gameZoneColumns ))
+	fi
 }
 
-drawCardSpace() {
-	drawObject "$1" "$2" "${objectColor[cardSpaceId]}" "${objectText[cardSpaceId]}"
+movePlayerToZone() {
+	drawCursor false "$playerZone"
+
+	if $playerSelect
+	then
+		drawGameZone false "$playerZone"
+		drawGameZone true "$playerZone"
+	fi
+
+	playerZone="$1"
+	playerPileIndex=0
+
+	drawCursor true "$playerZone"
 }
 
-drawCardEdge() {
-	drawObject "$1" "$2" "${objectColor[cardEdgeId]}" "${objectText[cardEdgeId]}"
+executePlayerAction() {
+	case "${gameZone[playerZone]}" in
+		# "$stockPile") dealToWastePile;;
+        "$wastePile") togglePlayerSelect;;
+        "$foundationPile") togglePlayerSelect;;
+        "$tableauPile") togglePlayerSelect;;
+	esac
 }
 
-drawCardShadow() {
-	drawObject "$1" "$2" "${objectColor[cardShadowId]}" "${objectText[cardShadowId]}"
+togglePlayerSelect() {
+	if $playerSelect
+	then
+		validatePlaceCards && placeCardsDown
+	else
+		(( gameZoneCardsTotal[playerZone] > 0 )) && pickCardsUp
+	fi
+}
+
+pickCardsUp() {
+	local cards
+
+	drawGameZone false "$playerZone"
+	drawCursor false "$playerZone"
+
+	IFS=';' cards=(${gameZoneCards[playerZone]})
+	cardsTotal="${#cards[@]}"
+
+	playerCardsTotal=$(( playerPileIndex + 1 ))
+	playerCards="${cards[*]: -playerCardsTotal}"
+	gameZoneCards[playerZone]="${cards[*]::cardsTotal - playerCardsTotal}"
+	(( gameZoneCardsTotal[playerZone] -= playerCardsTotal ))
+	lastPickupZone="$playerZone"
+
+	playerSelect=true
+
+	drawGameZone true "$playerZone"
+	drawCursor true "$playerZone"
+}
+
+validatePlaceCards() {
+	(( playerZone == lastPickupZone )) && return
+
+	local playerBottomCard="${playerCards%%;*}"
+	local zoneTopCard="${gameZoneCards[playerZone]##*;}"
+
+	if (( gameZone[playerZone] == tableauPile ))
+	then
+		(( gameZoneCardsTotal[playerZone] == 0 )) && \
+		[[ "${rank[${cardRank[$playerBottomCard]}]}" = K ]] && return
+		
+		(( gameZoneCardsTotal[playerZone] > 0 )) && \
+		(( cardRank[zoneTopCard] == cardRank[playerBottomCard] + 1 )) && \
+		(( (cardSuit[zoneTopCard] + cardSuit[playerBottomCard]) % 2 == 1 )) && return
+
+	elif (( gameZone[playerZone] == foundationPile ))
+	then
+		(( gameZoneCardsTotal[playerZone] == 0 )) && \
+		[[ "${rank[${cardRank[$playerBottomCard]}]}" = A ]] && return
+
+		(( gameZoneCardsTotal[playerZone] > 0 )) && \
+		(( cardRank[playerBottomCard] == cardRank[zoneTopCard] + 1 )) && \
+		(( cardSuit[zoneTopCard] == cardSuit[playerBottomCard] )) && return
+	else
+		return 1
+	fi
+}
+
+placeCardsDown() {
+	drawGameZone false "$playerZone"
+	drawCursor false "$playerZone"
+
+	(( gameZoneCardsTotal[playerZone] > 0 )) && gameZoneCards[playerZone]+=";"
+	gameZoneCards[playerZone]+="$playerCards"
+	(( gameZoneCardsTotal[playerZone] += playerCardsTotal ))
+	playerCardsTotal=0
+	playerCards=
+
+	if (( playerZone != lastPickupZone )) && \
+	   (( gameZoneHidden[lastPickupZone] > 0 )) && \
+	   (( gameZoneHidden[lastPickupZone] == gameZoneCardsTotal[lastPickupZone] ))
+	then
+		(( gameZoneHidden[lastPickupZone]-- ))
+		drawGameZone true "$lastPickupZone"
+	fi
+
+	playerSelect=false
+
+	drawGameZone true "$playerZone"
+	drawCursor true "$playerZone"
+}
+
+cycleColorTheme() {
+	(( themeId = (themeId + 1) % themeTotal ))
+	theme=("${themes[@]:(themeId * themeParamsTotal):(themeParamsTotal)}")
+	setColors
+	drawAllGameZones
+	drawCursor true "$playerZone"
+}
+
+newGame() {
+	initPlayer
+	shuffleDeck
+	dealAllCards
+	tput clear
+	drawAllGameZones
+	drawCursor true "$playerZone"
+}
+
+initPlayer() {
+	playerZone="$playerStartZone"
+	playerX="$playerStartX"
+	playerY="$playerStartY"
+	playerPileIndex=0
+	playerSelect=false
+	playerCards=
+	playerCardsTotal=0
+	lastPickupZone=
+}
+
+quitGame() {
+	gameOn=false
+    kill -SIGUSR1 $$
+}
+
+reader() {
+	# trap exit SIGUSR1
+	local input="\0" output
+
+	while read -rsn 1 input
+	do
+		case "$input" in
+			q) output="$commandQuit" && break;;
+
+	        A) output="$commandMoveUp";;
+	        B) output="$commandMoveDown";;
+	        C) output="$commandMoveRight";;
+	        D) output="$commandMoveLeft";;
+	        ' ') output="$commandAction";;
+	        c) output="$commandCycleColors";;
+	        n) output="$commandNewGame";;
+		esac
+
+		input="\0"
+		[ -n "$output" ] && builtin printf "$output"
+		output=
+	done
+}
+
+debug() {
+	local playerBottomCard="${playerCards%%;*}"
+	draw 80 10 "playerBottomCard = $playerBottomCard"
+
+	local playerBottomCardRankKey="${cardRank[$playerBottomCard]}"
+	draw 80 11 "playerBottomCardRankKey = $playerBottomCardRankKey"
+
+	local playerBottomCardRankValue="${rank[$playerBottomCardRankKey]}"
+	draw 80 12 "playerBottomCardRankValue = $playerBottomCardRankValue"
+}
+
+controller() {
+	trap '' SIGUSR1
+	local input commands
+
+	commands[commandQuit]=quitGame
+	commands[commandMoveLeft]=movePlayerLeft
+	commands[commandMoveRight]=movePlayerRight
+	commands[commandMoveUp]=movePlayerUp
+	commands[commandMoveDown]=movePlayerDown
+	commands[commandAction]=executePlayerAction
+	commands[commandCycleColors]=cycleColorTheme
+	commands[commandNewGame]=newGame
+
+	while $gameOn
+	do
+		# debug
+        builtin printf "$buffer"
+        buffer=
+        read -rsn 1 input
+        ${commands[$input]}
+    done
 }
 
 clear
+trap '' SIGUSR1
+userSettings=$(stty -g)  # save user terminal state
+tput civis               # turn off cursor
+gameOn=true
 
-createObjects #&& debugObjects && exit
-setColors
+createObjects
+setColors #&& debugObjects && exit
 setGameZones
 
-gameZoneCards[0]='0'
-gameZoneCards[1]='1;2;3'
+# drawObject true 5 5 0
+# drawObject true 12 5 0 "$invert"
+# printf "$buffer\n"
 
-gameZoneCards[3]='0'
-gameZoneCards[4]='0;51'
-gameZoneCards[5]=''
-gameZoneCards[6]='51'
+newGame
 
-gameZoneCards[7]='14;15' && gameZoneHidden[7]=1
-gameZoneCards[8]='0'
-gameZoneCards[9]='0' && gameZoneHidden[9]=1
-gameZoneCards[10]='51;50;49'
-gameZoneCards[11]='51;50;49' && gameZoneHidden[11]=1
-gameZoneCards[12]='51;50;49' && gameZoneHidden[12]=2
-gameZoneCards[13]='51;50;49;0;4' && gameZoneHidden[13]=3
+reader | controller
 
-drawZoneCursor 8 && drawRangeCursor 8
-drawSelectCursor 8
-drawAllGameZones
+clear
+tput cnorm            # turn on cursor
+stty "$userSettings"  # restore user terminal state
 
-printf "$buffer\n\n"
 exit
+# sleep 0.5
+
+# movePlayerDown
+# printf "$buffer\n\n"
+# sleep 0.5
+
+# movePlayerRight
+# printf "$buffer\n\n"
+# sleep 0.5
+
+# movePlayerDown
+# printf "$buffer\n\n"
+# sleep 0.5
+
+# movePlayerRight
+# printf "$buffer\n\n"
+# sleep 0.5
+
+# movePlayerLeft
+# printf "$buffer\n\n"
+# sleep 0.5
+
+# movePlayerUp
+# printf "$buffer\n\n"
+# sleep 0.5
+
+# movePlayerLeft
+# printf "$buffer\n\n"
+# sleep 0.5
+
+# movePlayerUp
+# printf "$buffer\n\n"
+# sleep 0.5
+
+# -- Store object delete in table - objectOn objectOff
+# -- player current / previous as movement history array?
+# -- 
+
+
+# for (( n = 0; n < tableauZoneTotal; n++ ))
+# do
+# 	zoneId="${tableauZone[n]}"
+# 	printf "${gameZoneCards[zoneId]}\n"
+# done
+
+# sleep 1
+# mode=ERASE drawZoneCursor "$playerStartZone"
+# mode=ERASE drawRangeCursor "$playerStartZone"
+# drawZoneCursor "$(( playerStartZone - 1 ))"
+# drawRangeCursor "$(( playerStartZone - 1 ))"
+# printf "$buffer\n\n"
+
+# sleep 1
+
+exit
+
+# gameZoneCards[0]='0'
+# gameZoneCards[1]='1;2;3'
+
+# gameZoneCards[3]='0'
+# gameZoneCards[4]='0;51'
+# gameZoneCards[5]=''
+# gameZoneCards[6]='51'
+
+# gameZoneCards[7]='14;15' && gameZoneHidden[7]=1
+# gameZoneCards[8]='0'
+# gameZoneCards[9]='0' && gameZoneHidden[9]=1
+# gameZoneCards[10]='51;50;49'
+# gameZoneCards[11]='51;50;49' && gameZoneHidden[11]=1
+# gameZoneCards[12]='51;50;49' && gameZoneHidden[12]=2
+# gameZoneCards[13]='51;50;49;0;4' && gameZoneHidden[13]=3
+
+# drawSelectCursor 8
+# drawAllGameZones
+
+
 
 drawCard 3 2 0
 drawCard 10 2 45 v && drawCard 13 2 23 v && drawCard 16 2 18
