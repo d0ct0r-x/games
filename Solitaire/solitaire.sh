@@ -1,6 +1,14 @@
 #!/bin/bash
+
+# TODO
+# Win condition / you win animation
+# Auto undo
+# Movement restriction
+# Movement shortcuts 
+# Remove unused code / tidy
+
 space=' '
-nbsp=$'\u00a0'
+nbsp=$'\302\240'
 colorReset='\033[0m'
 underline='\033[4m'
 bold='\033[1m'
@@ -77,7 +85,7 @@ darkTheme=(
 )
 
 themes=("${defaultTheme[@]}" "${darkTheme[@]}")
-theme=("${darkTheme[@]}")
+theme=("${defaultTheme[@]}")
 themeId=0
 themeParamsTotal="${#defaultTheme[@]}"
 themeTotal=$(( ${#themes[@]} / themeParamsTotal ))
@@ -119,7 +127,8 @@ gameOriginY=2
 columnSpacing=3
 rowSpacing=3
 gameZoneColumns=7
-maxPileSize=7
+tableauPileLimit=7
+wastePileLimit=3
 
 rankTotal="${#rank[@]}"
 suitTotal="${#suit[@]}"
@@ -140,18 +149,6 @@ commandMoveDown=4
 commandAction=5
 commandCycleColors=6
 commandNewGame=7
-
-current=0
-previous=1
-
-debugObjects() {
-	objectTotal="${#objectOn[@]}"
-
-	for (( n = 0; n < objectTotal; n++ ))
-	do
-		printf "${objectColor[n]}${objectOn[n]}$colorReset|${objectOff[n]}|\n"
-	done
-}
 
 createObjects() {
 	createDeck
@@ -391,7 +388,7 @@ dealAllCards() {
 		gameZoneHidden[n]=0
 	done
 
-	for (( row = 0; row < maxPileSize; row++ ))
+	for (( row = 0; row < tableauPileLimit; row++ ))
 	do
 		for (( column = row; column < tableauZoneTotal; column++ ))
 		do
@@ -407,6 +404,7 @@ dealAllCards() {
 	while (( deckIndex < cardTotal ))
 	do
 		gameZoneCards[stockZone]+="${deck[deckIndex]}"
+		(( gameZoneCardsTotal[stockZone]++ ))
 		(( deckIndex < cardTotal - 1 )) && gameZoneCards[stockZone]+="${space}"
 		(( deckIndex++ ))
 	done
@@ -436,7 +434,7 @@ drawGameZone() {
 drawStockPile() {
 	local x="${gameZoneX[n]}"
 	local y="${gameZoneY[n]}"
-	[[ "${gameZoneCards[n]}" = "" ]] && drawCardSpace "$x" "$y" && return
+	[[ "${gameZoneCards[n]}" = "" ]] && drawCardSpace "$isVisible" "$x" "$y" && return
 
 	drawFaceDownCard "$isVisible" "${gameZoneX[n]}" "${gameZoneY[n]}"
 }
@@ -445,15 +443,15 @@ drawWastePile() {
 	local x="${gameZoneX[n]}"
 	local y="${gameZoneY[n]}"
 	local i pile
-	[[ "${gameZoneCards[n]}" = "" ]] && return
+	(( wastePileIndex == 0 )) && return
 
 	pile=(${gameZoneCards[n]})
 	local total="${#pile[@]}"
 
-	for (( i = 0; i < total; i++ ))
+	for (( i = 0; i < wastePileIndex; i++ ))
 	do
 		(( i > 0 )) && drawCardEdge "$isVisible" "$(( x - 1))" "$y"
-		drawCard "$isVisible" "$x" "$y" "${pile[i]}"
+		drawCard "$isVisible" "$x" "$y" "${pile[total - wastePileIndex + i]}"
 
 		(( x += 3 ))
 	done
@@ -489,16 +487,22 @@ drawTableauPile() {
 drawPlayerCards() {
 	local x="${gameZoneX[playerZone]}"
 	local y="${gameZoneY[playerZone]}"
-	local offset="${gameZoneCardsTotal[playerZone]}"
-	local i pile objectId color
+	local offset i pile objectId color
 
 	pile=($playerCards)
 	local total="${#pile[@]}"
-	(( gameZone[playerZone] == tableauPile )) && (( y += offset ))
 
-	# (( offset > 0 )) && drawCardShadow "$1" "$x" "$y"
-	# local zoneTopCard="${gameZoneCards[playerZone]##*;}"
-	# (( offset > 0 )) && drawObject "$1" "$x" "$(( y - 1 ))" "$zoneTopCard" "${objectColor[zoneTopCard]}${invert}"
+	if (( gameZone[playerZone] == tableauPile ))
+	then
+		offset="${gameZoneCardsTotal[playerZone]}"
+		(( y += offset ))
+
+	elif (( gameZone[playerZone] == wastePile ))
+	then
+		offset="$wastePileIndex"
+		(( offset > 0 )) && (( x += offset * 3 ))
+	fi
+
 	drawCardHighlight "$1"
 
 	for (( i = 0; i < total; i++ ))
@@ -518,13 +522,22 @@ drawCardHighlight() {
 	local zoneTopCard="${gameZoneCards[playerZone]##*${space}}"
 	local highlightColor="${objectColor[zoneTopCard]}"
 
-	(( gameZone[playerZone] == tableauPile )) && (( y += offset - 1 ))
+	if (( gameZone[playerZone] == tableauPile ))
+	then
+		(( y += offset - 1 ))
+
+	elif (( gameZone[playerZone] == wastePile ))
+	then
+		offset="$wastePileIndex"
+		(( x += (offset - 1) * 3 ))
+	fi
 
 	(( cardSuit[zoneTopCard] % 2 == 0 )) && \
 	highlightColor+="${theme[cardHeartInverseColor]}" || \
 	highlightColor+="${theme[cardSpadeInverseColor]}"
 
 	(( offset > 0 )) && \
+	(( gameZone[playerZone] != stockPile )) && \
 	(( gameZoneCardsTotal[playerZone] > gameZoneHidden[playerZone] )) && \
 	drawObject "$1" "$x" "$(( y ))" "$zoneTopCard" "$highlightColor"
 }
@@ -563,9 +576,19 @@ drawCursor() {
 drawZoneCursor() {
 	local x="${gameZoneX[$2]}"
 	local y="${gameZoneY[$2]}"
-	local offset="${gameZoneCardsTotal[$2]}"
+	local offset
 
-	(( gameZone["$2"] == tableauPile )) && (( offset > 0 )) && (( y += offset - 1 ))
+	if (( gameZone["$2"] == tableauPile ))
+	then
+		offset="${gameZoneCardsTotal[$2]}"
+		(( offset > 0 )) && (( y += offset - 1 ))
+
+	elif (( gameZone["$2"] == wastePile ))
+	then
+		offset="$wastePileIndex"
+		(( offset > 0 )) && (( x += (offset - 1) * 3 ))
+	fi
+
 	drawObject "$1" "$(( x - 1 ))" "$(( y + cardHeight + 1 ))" "$zoneCursorId"
 }
 
@@ -582,9 +605,19 @@ drawRangeCursor() {
 drawSelectCursor() {
 	local x="${gameZoneX[$2]}"
 	local y="${gameZoneY[$2]}"
-	local offset="$(( gameZoneCardsTotal[$2] + playerCardsTotal ))"
+	local offset
 
-	(( gameZone["$2"] == tableauPile )) && (( offset > 0 )) && (( y += offset - 1 ))
+	if (( gameZone["$2"] == tableauPile ))
+	then
+		offset="$(( gameZoneCardsTotal[$2] + playerCardsTotal ))"
+		(( offset > 0 )) && (( y += offset - 1 ))
+
+	elif (( gameZone["$2"] == wastePile ))
+	then
+		offset="$wastePileIndex"
+		(( offset > 0 )) && (( x += offset * 3 ))
+	fi
+
 	drawObject "$1" "$(( x - 1 ))" "$(( y + cardHeight + 1 ))" "$selectCursorId"
 }
 
@@ -621,12 +654,26 @@ draw() {
 
 movePlayerLeft() {
 	(( playerX = (playerX - 1 + gameZoneColumns) % gameZoneColumns ))
-	movePlayerToZone $(( playerX + playerY * gameZoneColumns ))
+	local targetZone="$(( playerX + playerY * gameZoneColumns ))"
+	
+	if (( gameZone[targetZone] == noPile ))
+	then
+		movePlayerLeft
+	else
+		movePlayerToZone "$targetZone"
+	fi
 }
 
 movePlayerRight() {
 	(( playerX = (playerX + 1 + gameZoneColumns) % gameZoneColumns ))
-	movePlayerToZone $(( playerX + playerY * gameZoneColumns ))
+	local targetZone="$(( playerX + playerY * gameZoneColumns ))"
+
+	if (( gameZone[targetZone] == noPile ))
+	then
+		movePlayerRight
+	else
+		movePlayerToZone "$targetZone"
+	fi
 }
 
 movePlayerUp() {
@@ -639,7 +686,14 @@ movePlayerUp() {
 		drawRangeCursor true "$playerZone"
 	else
 		(( playerY = (playerY - 1 + gameZoneRows) % gameZoneRows ))
-		movePlayerToZone $(( playerX + playerY * gameZoneColumns ))
+		local targetZone="$(( playerX + playerY * gameZoneColumns ))"
+
+		if (( gameZone[targetZone] == noPile ))
+		then
+			movePlayerUp
+		else
+			movePlayerToZone "$targetZone"
+		fi
 	fi
 }
 
@@ -652,7 +706,14 @@ movePlayerDown() {
 		drawRangeCursor true "$playerZone"
 	else
 		(( playerY = (playerY + 1 + gameZoneRows) % gameZoneRows ))
-		movePlayerToZone $(( playerX + playerY * gameZoneColumns ))
+		local targetZone="$(( playerX + playerY * gameZoneColumns ))"
+
+		if (( gameZone[targetZone] == noPile ))
+		then
+			movePlayerDown
+		else
+			movePlayerToZone "$targetZone"
+		fi
 	fi
 }
 
@@ -673,44 +734,57 @@ movePlayerToZone() {
 
 executePlayerAction() {
 	case "${gameZone[playerZone]}" in
-		# "$stockPile") dealToWastePile;;
+		"$stockPile") dealToWastePile;;
         "$wastePile") togglePlayerSelect;;
         "$foundationPile") togglePlayerSelect;;
         "$tableauPile") togglePlayerSelect;;
 	esac
 }
 
-togglePlayerSelect() {
-	if $playerSelect
-	then
-		validatePlaceCards && placeCardsDown
-	else
-		(( gameZoneCardsTotal[playerZone] > 0 )) && pickCardsUp
-	fi
-}
+dealToWastePile() {
+	$playerSelect && macroAutoUndo && return
 
-pickCardsUp() {
-	local cards
-
-	drawGameZone false "$playerZone"
+	local cards=(${gameZoneCards[stockZone]})
+	local stockTotal="${#cards[@]}"
+	local wasteTotal="${gameZoneCardsTotal[wasteZone]}"
+	local takeTotal
+	
+	drawGameZone false "$stockZone"
+	drawGameZone false "$wasteZone"
 	drawCursor false "$playerZone"
 
-	cards=(${gameZoneCards[playerZone]})
-	cardsTotal="${#cards[@]}"
+	if (( stockTotal > 0 ))
+    then
+        takeTotal=$(( stockTotal < wastePileLimit ? stockTotal : wastePileLimit ))
+        (( wasteTotal > 0 )) && gameZoneCards[wasteZone]+="${space}"
+        gameZoneCards[wasteZone]+="${cards[*]::takeTotal}"
+        gameZoneCards[stockZone]="${cards[*]:takeTotal}"
+        (( gameZoneCardsTotal[wasteZone] += takeTotal ))
+        (( gameZoneCardsTotal[stockZone] -= takeTotal ))
+        wastePileIndex="$takeTotal"
+    else
+        gameZoneCards[stockZone]="${gameZoneCards[wasteZone]}"
+        gameZoneCards[wasteZone]=
+        gameZoneCardsTotal[stockZone]="$wasteTotal"
+        gameZoneCardsTotal[wasteZone]=0
+        wastePileIndex=0
+    fi
 
-	playerCardsTotal=$(( playerPileIndex + 1 ))
-	playerCards="${cards[*]: -playerCardsTotal}"
-	gameZoneCards[playerZone]="${cards[*]::cardsTotal - playerCardsTotal}"
-	(( gameZoneCardsTotal[playerZone] -= playerCardsTotal ))
-	lastPickupZone="$playerZone"
-
-	playerSelect=true
-
-	drawGameZone true "$playerZone"
+	drawGameZone true "$stockZone"
+	drawGameZone true "$wasteZone"
 	drawCursor true "$playerZone"
 }
 
-validatePlaceCards() {
+togglePlayerSelect() {
+	if $playerSelect
+	then
+		validatePlaceDownCards && placeDownCards
+	else
+		validatePickUpCards && pickUpCards
+	fi
+}
+
+validatePlaceDownCards() {
 	(( playerZone == lastPickupZone )) && return
 
 	local playerBottomCard="${playerCards%%${space}*}"
@@ -727,18 +801,37 @@ validatePlaceCards() {
 
 	elif (( gameZone[playerZone] == foundationPile ))
 	then
-		(( gameZoneCardsTotal[playerZone] == 0 )) && \
-		[[ "${rank[${cardRank[$playerBottomCard]}]}" = A ]] && return
+		checkPlaceDownFoundationPile "$playerBottomCard" "$playerZone" && return
+	fi
 
-		(( gameZoneCardsTotal[playerZone] > 0 )) && \
-		(( cardRank[playerBottomCard] == cardRank[zoneTopCard] + 1 )) && \
-		(( cardSuit[zoneTopCard] == cardSuit[playerBottomCard] )) && return
+	macroAutoUndo
+	return 1
+}
+
+macroAutoUndo() {
+	local saveZone="$playerZone"
+	movePlayerToZone "$lastPickupZone"
+	placeDownCards
+	movePlayerToZone "$saveZone"
+	return 0
+}
+
+checkPlaceDownFoundationPile() {
+	local sourceCard="$1"
+	local targetZone="$2"
+
+	if (( gameZoneCardsTotal[targetZone] == 0 ))
+	then
+		[[ "${rank[${cardRank[$sourceCard]}]}" = A ]]
 	else
-		return 1
+		local targetCard="${gameZoneCards[targetZone]##*${space}}"
+
+		(( cardRank[sourceCard] == cardRank[targetCard] + 1 )) && \
+		(( cardSuit[sourceCard] == cardSuit[targetCard] ))
 	fi
 }
 
-placeCardsDown() {
+placeDownCards() {
 	drawGameZone false "$playerZone"
 	drawCursor false "$playerZone"
 
@@ -747,6 +840,7 @@ placeCardsDown() {
 	(( gameZoneCardsTotal[playerZone] += playerCardsTotal ))
 	playerCardsTotal=0
 	playerCards=
+	(( gameZone[playerZone] == wastePile )) && (( wastePileIndex++ ))
 
 	if (( playerZone != lastPickupZone )) && \
 	   (( gameZoneHidden[lastPickupZone] > 0 )) && \
@@ -757,6 +851,65 @@ placeCardsDown() {
 	fi
 
 	playerSelect=false
+
+	drawGameZone true "$playerZone"
+	drawCursor true "$playerZone"
+}
+
+validatePickUpCards() {
+	(( gameZoneCardsTotal[playerZone] == 0 )) && return 1
+
+	(( gameZone[playerZone] == wastePile )) && \
+	(( wastePileIndex == 0 )) && return 1
+
+	if (( playerPileIndex == 0)) && \
+	   (( gameZone[playerZone] != foundationPile ))
+	then
+		checkAutoMove && return 1
+	fi
+
+	return 0
+}
+
+checkAutoMove() {
+	local playerBottomCard="${gameZoneCards[playerZone]##*${space}}"
+	local n targetZone
+
+	for (( n = 0; n < foundationZoneTotal; n++ ))
+	do
+		targetZone="${foundationZone[n]}"
+		checkPlaceDownFoundationPile "$playerBottomCard" "$targetZone" && \
+		macroAutoMove && return 0
+	done
+
+	return 1
+}
+
+macroAutoMove() {
+	pickUpCards
+	movePlayerToZone "$targetZone"
+	placeDownCards
+	movePlayerToZone "$lastPickupZone"
+	return 0
+}
+
+pickUpCards() {
+	local cards cardsTotal
+
+	drawGameZone false "$playerZone"
+	drawCursor false "$playerZone"
+
+	cards=(${gameZoneCards[playerZone]})
+	cardsTotal="${#cards[@]}"
+
+	playerCardsTotal=$(( playerPileIndex + 1 ))
+	playerCards="${cards[*]: -playerCardsTotal}"
+	gameZoneCards[playerZone]="${cards[*]::cardsTotal - playerCardsTotal}"
+	(( gameZoneCardsTotal[playerZone] -= playerCardsTotal ))
+	lastPickupZone="$playerZone"
+	(( gameZone[playerZone] == wastePile )) && (( wastePileIndex-- ))
+
+	playerSelect=true
 
 	drawGameZone true "$playerZone"
 	drawCursor true "$playerZone"
@@ -788,6 +941,7 @@ initPlayer() {
 	playerCards=
 	playerCardsTotal=0
 	lastPickupZone=
+	wastePileIndex=0
 }
 
 quitGame() {
@@ -809,7 +963,6 @@ reader() {
 	        C) output="$commandMoveRight";;
 	        D) output="$commandMoveLeft";;
 	        ' ') output="$commandAction";;
-	        s) output="$commandAction";;
 	        c) output="$commandCycleColors";;
 	        n) output="$commandNewGame";;
 		esac
@@ -820,14 +973,20 @@ reader() {
 }
 
 debug() {
-	local playerBottomCard="${playerCards%%${space}*}"
-	draw 80 10 "playerBottomCard = $playerBottomCard"
-
-	local playerBottomCardRankKey="${cardRank[$playerBottomCard]}"
-	draw 80 11 "playerBottomCardRankKey = $playerBottomCardRankKey"
-
-	local playerBottomCardRankValue="${rank[$playerBottomCardRankKey]}"
-	draw 80 12 "playerBottomCardRankValue = $playerBottomCardRankValue"
+	local wastePileIndex="$wastePileIndex"
+	local stockCards="${gameZoneCards[stockZone]}"
+	local stockTotal="${gameZoneCardsTotal[stockZone]}"
+	local wasteCards="${gameZoneCards[wasteZone]}"
+	local wasteTotal="${gameZoneCardsTotal[wasteZone]}"
+	draw 20 20 "wastePileIndex = $wastePileIndex"
+	draw 20 21 "stockCards =                                                  "
+	draw 20 21 "stockCards = $stockCards"
+	draw 20 22 "wasteCards =                                                  "
+	draw 20 22 "wasteCards = $wasteCards"
+	draw 20 23 "stockTotal =   "
+	draw 20 23 "stockTotal = $stockTotal"
+	draw 20 24 "wasteTotal =   "
+	draw 20 24 "wasteTotal = $wasteTotal"
 }
 
 controller() {
