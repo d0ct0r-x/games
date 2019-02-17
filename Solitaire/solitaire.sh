@@ -1,11 +1,10 @@
 #!/bin/bash
 
 # TODO
-# Win condition / you win animation
-# Auto undo
-# Movement restriction
-# Movement shortcuts 
-# Remove unused code / tidy
+# Description in code
+# Remove unused code / tidy declare variables etc
+# Controls / help
+# Timer / score
 
 space=' '
 nbsp=$'\302\240'
@@ -92,7 +91,7 @@ themeTotal=$(( ${#themes[@]} / themeParamsTotal ))
 
 rank=(A 2 3 4 5 6 7 8 9 10 J Q K)
 suit=(♥ ♣ ♦ ♠)
-cardFaceUp=(
+cardFaceUp=( 
 	'1>  ♥'
 	'     '
 	'♥  <1'
@@ -141,14 +140,22 @@ playerStartX="$(( (gameZoneColumns - 1) / 2 ))"
 playerStartY="$(( gameZoneRows - 1 ))"
 playerStartZone="$(( playerStartX + playerStartY * gameZoneColumns ))"
 
-commandQuit=0
-commandMoveLeft=1
-commandMoveRight=2
-commandMoveUp=3
-commandMoveDown=4
-commandAction=5
-commandCycleColors=6
-commandNewGame=7
+commandQuit=10
+commandMoveLeft=11
+commandMoveRight=12
+commandMoveUp=13
+commandMoveDown=14
+commandAction=15
+commandCycleColors=16
+commandNewGame=17
+macroSelect1=18
+macroSelect2=19
+macroSelect3=20
+macroSelect4=21
+macroSelect5=22
+macroSelect6=23
+macroSelect7=24
+macroDeal=25
 
 createObjects() {
 	createDeck
@@ -381,12 +388,10 @@ dealAllCards() {
 	local n row column zoneId
 	local deckIndex=0
 
-	for (( n = 0; n < gameZoneTotal; n++ ))
-	do
-		gameZoneCards[n]=
-		gameZoneCardsTotal[n]=0
-		gameZoneHidden[n]=0
-	done
+	completedCardsTotal=0
+	gameZoneCards=()
+	gameZoneCardsTotal=()
+	gameZoneHidden=()
 
 	for (( row = 0; row < tableauPileLimit; row++ ))
 	do
@@ -539,7 +544,7 @@ drawCardHighlight() {
 	(( offset > 0 )) && \
 	(( gameZone[playerZone] != stockPile )) && \
 	(( gameZoneCardsTotal[playerZone] > gameZoneHidden[playerZone] )) && \
-	drawObject "$1" "$x" "$(( y ))" "$zoneTopCard" "$highlightColor"
+	drawObject "$1" "$x" "$y" "$zoneTopCard" "$highlightColor"
 }
 
 drawCard() {
@@ -681,12 +686,15 @@ movePlayerUp() {
 	   (( playerPileIndex < gameZoneCardsTotal[playerZone] - gameZoneHidden[playerZone] - 1 )) && \
 	   ! $playerSelect
 	then
-		drawRangeCursor false "$playerZone"
-		(( playerPileIndex++ ))
-		drawRangeCursor true "$playerZone"
+		moveRangeCursorBy 1
 	else
-		(( playerY = (playerY - 1 + gameZoneRows) % gameZoneRows ))
-		local targetZone="$(( playerX + playerY * gameZoneColumns ))"
+		local newY="$(( (playerY - 1 + gameZoneRows) % gameZoneRows ))"
+		local targetZone="$(( playerX + newY * gameZoneColumns ))"
+
+		(( gameZone[targetZone] != tableauPile )) && \
+		(( playerCardsTotal > 1 )) && return
+
+		playerY="$newY"
 
 		if (( gameZone[targetZone] == noPile ))
 		then
@@ -701,12 +709,15 @@ movePlayerDown() {
 	if (( gameZone[playerZone] == tableauPile )) && \
 	   (( playerPileIndex > 0 ))
 	then
-		drawRangeCursor false "$playerZone"
-		(( playerPileIndex-- ))
-		drawRangeCursor true "$playerZone"
+		moveRangeCursorBy -1
 	else
-		(( playerY = (playerY + 1 + gameZoneRows) % gameZoneRows ))
-		local targetZone="$(( playerX + playerY * gameZoneColumns ))"
+		local newY="$(( (playerY + 1 + gameZoneRows) % gameZoneRows ))"
+		local targetZone="$(( playerX + newY * gameZoneColumns ))"
+
+		(( gameZone[targetZone] != tableauPile )) && \
+		(( playerCardsTotal > 1 )) && return
+
+		playerY="$newY"
 
 		if (( gameZone[targetZone] == noPile ))
 		then
@@ -730,6 +741,14 @@ movePlayerToZone() {
 	playerPileIndex=0
 
 	drawCursor true "$playerZone"
+}
+
+moveRangeCursorBy() {
+	local increment="$1"
+
+	drawRangeCursor false "$playerZone"
+	(( playerPileIndex += increment ))
+	drawRangeCursor true "$playerZone"
 }
 
 executePlayerAction() {
@@ -809,10 +828,10 @@ validatePlaceDownCards() {
 }
 
 macroAutoUndo() {
-	local saveZone="$playerZone"
+	local savedZone="$playerZone"
 	movePlayerToZone "$lastPickupZone"
 	placeDownCards
-	movePlayerToZone "$saveZone"
+	movePlayerToZone "$savedZone"
 	return 0
 }
 
@@ -841,6 +860,7 @@ placeDownCards() {
 	playerCardsTotal=0
 	playerCards=
 	(( gameZone[playerZone] == wastePile )) && (( wastePileIndex++ ))
+	(( gameZone[playerZone] == foundationPile )) && (( completedCardsTotal++ ))
 
 	if (( playerZone != lastPickupZone )) && \
 	   (( gameZoneHidden[lastPickupZone] > 0 )) && \
@@ -908,11 +928,44 @@ pickUpCards() {
 	(( gameZoneCardsTotal[playerZone] -= playerCardsTotal ))
 	lastPickupZone="$playerZone"
 	(( gameZone[playerZone] == wastePile )) && (( wastePileIndex-- ))
+	(( gameZone[playerZone] == foundationPile )) && (( completedCardsTotal-- ))
 
 	playerSelect=true
 
 	drawGameZone true "$playerZone"
 	drawCursor true "$playerZone"
+}
+
+macroQuickSelect() {
+	local targetZone="$1"
+
+	movePlayerToZone "$targetZone"
+
+	if ! $playerSelect
+	then
+		validatePickUpCards || return
+		local maxVisible="$(( gameZoneCardsTotal[playerZone] - gameZoneHidden[playerZone] - 1 ))"
+		moveRangeCursorBy "$maxVisible"
+		pickUpCards
+	else
+		togglePlayerSelect
+	fi
+}
+
+macroQuickDeal() {
+	if $playerSelect
+	then
+		if (( gameZone[playerZone] == wastePile ))
+		then
+			togglePlayerSelect
+			dealToWastePile
+			togglePlayerSelect
+		fi
+	else
+		(( wastePileIndex == 0 )) && dealToWastePile
+		movePlayerToZone "$wasteZone"
+		togglePlayerSelect
+	fi
 }
 
 cycleColorTheme() {
@@ -944,6 +997,14 @@ initPlayer() {
 	wastePileIndex=0
 }
 
+winGame() {
+	drawCursor false "$playerZone"
+	draw 18 8 "You win! Press any key to quit."
+    builtin printf "$buffer"
+    buffer=
+    quitGame
+}
+
 quitGame() {
 	gameOn=false
     kill -SIGUSR1 $$
@@ -951,12 +1012,12 @@ quitGame() {
 
 reader() {
 	# trap exit SIGUSR1
-	local input= output=
+	local input output
 
 	while IFS= read -sn 1 input
 	do
 		case "$input" in
-			q) output="$commandQuit" && break;;
+			q) output="$commandQuit";;
 
 	        A) output="$commandMoveUp";;
 	        B) output="$commandMoveDown";;
@@ -965,28 +1026,26 @@ reader() {
 	        ' ') output="$commandAction";;
 	        c) output="$commandCycleColors";;
 	        n) output="$commandNewGame";;
+
+	        a) output="$macroSelect1";;
+	        s) output="$macroSelect2";;
+	        d) output="$macroSelect3";;
+	        f) output="$macroSelect4";;
+	        g) output="$macroSelect5";;
+	        h) output="$macroSelect6";;
+	        j) output="$macroSelect7";;
+	        w) output="$macroDeal";;
 		esac
 
 		[ -n "$output" ] && builtin printf "$output"
+		(( output == commandQuit )) && break
 		output=
 	done
 }
 
 debug() {
-	local wastePileIndex="$wastePileIndex"
-	local stockCards="${gameZoneCards[stockZone]}"
-	local stockTotal="${gameZoneCardsTotal[stockZone]}"
-	local wasteCards="${gameZoneCards[wasteZone]}"
-	local wasteTotal="${gameZoneCardsTotal[wasteZone]}"
-	draw 20 20 "wastePileIndex = $wastePileIndex"
-	draw 20 21 "stockCards =                                                  "
-	draw 20 21 "stockCards = $stockCards"
-	draw 20 22 "wasteCards =                                                  "
-	draw 20 22 "wasteCards = $wasteCards"
-	draw 20 23 "stockTotal =   "
-	draw 20 23 "stockTotal = $stockTotal"
-	draw 20 24 "wasteTotal =   "
-	draw 20 24 "wasteTotal = $wasteTotal"
+	local debug="$debug"
+	draw 20 20 "debug = $debug"
 }
 
 controller() {
@@ -1002,13 +1061,23 @@ controller() {
 	commands[commandCycleColors]=cycleColorTheme
 	commands[commandNewGame]=newGame
 
+	commands[macroSelect1]='macroQuickSelect 7'
+	commands[macroSelect2]='macroQuickSelect 8'
+	commands[macroSelect3]='macroQuickSelect 9'
+	commands[macroSelect4]='macroQuickSelect 10'
+	commands[macroSelect5]='macroQuickSelect 11'
+	commands[macroSelect6]='macroQuickSelect 12'
+	commands[macroSelect7]='macroQuickSelect 13'
+	commands[macroDeal]='macroQuickDeal'
+
 	while $gameOn
 	do
 		# debug
         builtin printf "$buffer"
         buffer=
-        read -sn 1 input
+        read -sn 2 input
         ${commands[$input]}
+        (( completedCardsTotal == cardTotal )) && winGame
     done
 }
 
