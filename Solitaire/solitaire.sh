@@ -1,10 +1,32 @@
 #!/bin/bash
 
-# TODO
-# Description in code
-# Remove unused code / tidy declare variables etc
-# Controls / help
-# Timer / score
+#  Solitaire game in bash
+#  Version:  0.0.1
+#  Author:   Tom Lloyd (twisted_tomato@hotmail.com)
+#  Date:     17/02/2019
+
+#  -- CONTROLS --
+#  Use arrow keys to move
+#  [SPACE]          - Action (Pick/Place/Deal)
+#  [q]              - Quit game
+#  [n]              - New game
+#  [c]              - Cycle colour theme
+#  [a,s,d,f,g,h,j]  - Quick pick/place for piles 1-7
+#                     (Put left 3 fingers on [a,s,d], right 3 fingers on [g,h,j], any finger hits [f])
+#  [w]              - Quick deal
+#                     (Use left middle finger. Press once to go to waste pile, press again to deal)
+
+#  -- FEATURES --
+#  * All text based sprites
+#  * Default & dark colour themes
+#  * Auto unhide, undo & move
+#  * Configurable UI (Resize, position)
+#  * Tested working on Windows Git Bash & Mac OSX Terminal
+
+#  -- TODO --
+#  Remove unused code / tidy declare variables etc
+#  Controls / help
+#  Timer / score
 
 space=' '
 nbsp=$'\302\240'
