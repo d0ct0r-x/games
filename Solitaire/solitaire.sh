@@ -574,6 +574,8 @@ drawCardEdge() {
 }
 
 drawCursor() {
+	(( gameZone["$2"] == noPile )) && return
+
 	if $playerSelect
 	then
 		drawSelectCursor "$1" "$2"
